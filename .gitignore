@@ -1,0 +1,17 @@
+# 데이터 (보안 규칙 — 절대 커밋 금지)
+data/
+
+# 환경·비밀
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# 로컬 산출물
+chroma_db/
+*.sqlite3
