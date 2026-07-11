@@ -72,7 +72,7 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 ## 개발 방법론 (요약)
 
-- **SDD 3층**: 지시서 v1.1(전체 스펙) → docs/SPEC.md(MVP 범위 + 개발 단위 목록) → 단위별 계획(게이트 1에서 상세화). 점진 상세화 — 미리 전부 확정하지 않는다.
+- **SDD 2층**: docs/SPEC.md(MVP 범위 + 개발 단위 목록) → 단위별 계획(게이트 1에서 상세화). 점진 상세화 — 미리 전부 확정하지 않는다.
 - **개발 단위**: 파일이 아니라 테스트 가능한 행위 단위. SPEC.md의 단위 목록 순서대로 진행.
 - **TDD 4게이트 (핵심부)**: ① 계획 승인 → ② red(실패 테스트 + 실패 증거) 승인 → ③ green→refactor(통과 증거) 승인 → ④ 커밋 메시지 승인 → commit+push. 승인은 사용자의 명시 답변으로만 성립한다.
   - 풀 게이트 대상: 에이전트 그래프, 도구 4종, VQA 채점기, 인덱싱 파이프라인
@@ -85,7 +85,7 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 - 커밋 전 pytest + ruff 통과 필수.
 - 홀드아웃 평가 이미지(~20장)의 인덱스 유입 차단 검사를 통과해야 한다.
 
-## 금지 상호작용 (지시서)
+## 금지 상호작용 (아키텍처 계약)
 
 - 도구 간 직접 호출 금지 — 도구는 오케스트레이터(에이전트 그래프)만 호출한다.
 - 도구의 S0(원본 데이터) 직접 접근 금지.
@@ -102,10 +102,6 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 - `data/`는 절대 커밋하지 않는다 (.gitignore).
 - docs/DATA_NOTES.md에는 스키마·규칙·집계 통계만 기록한다. 캡션 원문 전문 인용 금지, 이미지 포함 금지.
-
-## 용어 규칙
-
-- "포트폴리오", "취업용", "발주사" 단어를 대화·문서·코드 주석·커밋 메시지 어디에도 쓰지 않는다. 실제 업무로 상정하고 진행하며, 결정 주체는 사용자다.
 
 ## 기술 스택 (확정)
 
