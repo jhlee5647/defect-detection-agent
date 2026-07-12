@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+
 from defect_agent.labels import Equipment, load_all_labels, representative_defect
 
 라벨_루트 = Path("data/02.라벨링데이터")
