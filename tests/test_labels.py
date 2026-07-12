@@ -22,6 +22,7 @@ from defect_agent.labels import (
 
 풍력_결함_경로 = "WindBlade/A/LeadingEdge/2022_Sungsan_10_A_LeadingEdge_001.json"
 태양광_정상_경로 = "SolarPanel/Normal/PanelFront/2025_Eumseong_Normal_00001.json"
+태양광_결함_경로 = "SolarPanel/Positive/PanelFront/2025_Eumseong_Positive_00001.json"
 
 
 def _문항(종류: str, 보기: dict[str, str], 정답: str) -> dict:
@@ -110,6 +111,30 @@ def 태양광_정상_데이터() -> dict:
             "height": 512,
             "filename": "2025_Eumseong_Normal_00001.jpg",
         },
+        "visionqa": visionqa,
+    }
+
+
+def 태양광_결함_데이터() -> dict:
+    """태양광 결함 변형 — detection + localization, cropped_bbox 없음 (DATA_NOTES §3)."""
+    visionqa = {"object_description": "패널 열화상 설명"}
+    visionqa |= _문항("detection", {"a": "예", "b": "아니오"}, "a")
+    visionqa |= _문항(
+        "localization",
+        {"a": "[191,65,7,6]", "b": "[0,0,10,10]", "c": "[100,100,5,5]", "d": "[300,300,8,8]"},
+        "a",
+    )
+    return {
+        "info": {"db_name": "PositiveDB", "generator_name": "태양광", "part_side_tag": "Front"},
+        "collection": {"location": "Eumseong", "datetime": "2025-05-01 11:00:00"},
+        "categories": 태양광_카테고리,
+        "image": {
+            "id": 118506,
+            "width": 640,
+            "height": 512,
+            "filename": "2025_Eumseong_Positive_00001.jpg",
+        },
+        "annotations": [_주석(118506001, 10, 3, 37.0)],
         "visionqa": visionqa,
     }
 
@@ -227,6 +252,20 @@ def test_대표결함_심각도_동률이면_면적_최대(tmp_path):
             lambda d: d["visionqa"].update(defect_detection_a="z"), id="정답이_보기에_없음"
         ),
         pytest.param(lambda d: d["annotations"][0].pop("severity"), id="severity_부재"),
+        pytest.param(lambda d: d["info"].pop("part_side_tag"), id="part_side_tag_부재"),
+        pytest.param(lambda d: d["annotations"][0].update(severity="3"), id="severity가_문자열"),
+        pytest.param(
+            lambda d: d["annotations"][0].update(segmentation=[[0.0, 0.0, 10.0, 0.0, 10.0, 10.0]]),
+            id="segmentation_중첩_리스트",
+        ),
+        pytest.param(
+            lambda d: d["annotations"][0].update(segmentation=[0.0, 0.0, 10.0, 0.0, 10.0]),
+            id="segmentation_홀수_길이",
+        ),
+        pytest.param(
+            lambda d: d["annotations"][0].update(bbox=[0.0, "x", 10.0, 10.0]),
+            id="bbox_원소가_비숫자",
+        ),
     ],
 )
 def test_형식_이상은_즉시_에러(tmp_path, 훼손):
@@ -235,6 +274,77 @@ def test_형식_이상은_즉시_에러(tmp_path, 훼손):
     경로 = _저장(tmp_path, "WindBlade/A/LeadingEdge/2022_Sungsan_10_A_LeadingEdge_001.json", 데이터)
     with pytest.raises(LabelParseError):
         parse_label_file(경로)
+
+
+def test_깨진_JSON은_에러(tmp_path):
+    경로 = tmp_path / 풍력_결함_경로
+    경로.parent.mkdir(parents=True)
+    경로.write_text("{ 깨진 json", encoding="utf-8")
+    with pytest.raises(LabelParseError):
+        parse_label_file(경로)
+
+
+def test_파일_부재는_에러(tmp_path):
+    with pytest.raises(LabelParseError):
+        parse_label_file(tmp_path / "2022_Sungsan_10_A_LeadingEdge_001.json")
+
+
+# ── 변형 정합성: (설비, 정상여부)가 문항·cropped_bbox·annotations 구성을 결정 ──
+
+
+def _classification_문항_제거(d):
+    for 키 in [k for k in d["visionqa"] if "classification" in k]:
+        d["visionqa"].pop(키)
+
+
+@pytest.mark.parametrize(
+    "훼손",
+    [
+        pytest.param(lambda d: d.pop("annotations"), id="결함인데_annotations_키_부재"),
+        pytest.param(lambda d: d.update(annotations=[]), id="결함인데_annotations_빈_리스트"),
+        pytest.param(_classification_문항_제거, id="풍력_결함인데_classification_부재"),
+        pytest.param(
+            lambda d: d["visionqa"].pop("cropped_bbox"), id="풍력_결함인데_cropped_bbox_부재"
+        ),
+    ],
+)
+def test_변형_정합성_풍력_결함_위반은_에러(tmp_path, 훼손):
+    데이터 = 풍력_결함_데이터()
+    훼손(데이터)
+    경로 = _저장(tmp_path, 풍력_결함_경로, 데이터)
+    with pytest.raises(LabelParseError):
+        parse_label_file(경로)
+
+
+def test_변형_정합성_정상인데_annotations_존재는_에러(tmp_path):
+    데이터 = 풍력_정상_데이터()
+    데이터["annotations"] = [_주석(1, 3, 2, 10.0)]
+    경로 = _저장(
+        tmp_path, "WindBlade/B/TrailingEdge/2022_Sungsan_10_B_TrailingEdge_002.json", 데이터
+    )
+    with pytest.raises(LabelParseError):
+        parse_label_file(경로)
+
+
+def test_변형_정합성_태양광_결함인데_cropped_bbox_존재는_에러(tmp_path):
+    데이터 = 태양광_결함_데이터()
+    데이터["visionqa"]["cropped_bbox"] = [0, 0, 640, 512]
+    경로 = _저장(tmp_path, 태양광_결함_경로, 데이터)
+    with pytest.raises(LabelParseError):
+        parse_label_file(경로)
+
+
+def test_변형_정합성_태양광_파일명_태그와_db_name_불일치는_에러(tmp_path):
+    경로 = _저장(tmp_path, 태양광_정상_경로, 태양광_결함_데이터())  # 파일명 Normal + PositiveDB
+    with pytest.raises(LabelParseError):
+        parse_label_file(경로)
+
+
+def test_변형_정합성_태양광_결함은_통과(tmp_path):
+    record = parse_label_file(_저장(tmp_path, 태양광_결함_경로, 태양광_결함_데이터()))
+    assert record.is_normal is False
+    assert set(record.visionqa.questions) == {"detection", "localization"}
+    assert record.visionqa.cropped_bbox is None
 
 
 # ── 전체 로드 + 카테고리 일관성 검증 ──
@@ -255,5 +365,13 @@ def test_파일_간_카테고리_모순은_에러(tmp_path):
     모순["visionqa"]["defect_classification_option"]["classification_option_a"] = "Tape Damage"
     모순["image"]["filename"] = "2022_Sungsan_10_A_LeadingEdge_002.jpg"
     _저장(tmp_path, "WindBlade/A/LeadingEdge/2022_Sungsan_10_A_LeadingEdge_002.json", 모순)
+    with pytest.raises(LabelParseError):
+        load_all_labels(tmp_path)
+
+
+def test_stem_중복은_에러(tmp_path):
+    _저장(tmp_path, 풍력_결함_경로, 풍력_결함_데이터())
+    다른_폴더_경로 = "WindBlade/B/PressureSide/2022_Sungsan_10_A_LeadingEdge_001.json"
+    _저장(tmp_path, 다른_폴더_경로, 풍력_결함_데이터())
     with pytest.raises(LabelParseError):
         load_all_labels(tmp_path)

@@ -91,6 +91,19 @@ def _require(data: dict, key: str, ctx: str):
     return data[key]
 
 
+def _require_int(data: dict, key: str, ctx: str) -> int:
+    value = _require(data, key, ctx)
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise LabelParseError(f"{ctx}: '{key}'는 정수여야 함 — {value!r}")
+    return value
+
+
+def _number(value, ctx: str, what: str) -> float:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        raise LabelParseError(f"{ctx}: {what}이(가) 숫자가 아님 — {value!r}")
+    return float(value)
+
+
 def _parse_filename(stem: str, equipment: Equipment) -> FilenameParts:
     tokens = stem.split("_")
     expected = 6 if equipment is Equipment.WIND else 4
@@ -128,14 +141,17 @@ def _parse_annotation(raw: dict, categories: dict[int, str], stem: str) -> Annot
     bbox = _require(raw, "bbox", stem)
     if len(bbox) != 4:
         raise LabelParseError(f"{stem}: bbox는 [x,y,w,h] 4개여야 함 (실제 {len(bbox)})")
+    polygon = _require(raw, "segmentation", stem)
+    if not isinstance(polygon, list) or len(polygon) < 6 or len(polygon) % 2 != 0:
+        raise LabelParseError(f"{stem}: segmentation은 짝수 길이(≥6)의 평탄 리스트여야 함")
     return Annotation(
-        id=_require(raw, "id", stem),
+        id=_require_int(raw, "id", stem),
         category_id=category_id,
         category_name=categories[category_id],
-        severity=_require(raw, "severity", stem),
-        area=float(_require(raw, "area", stem)),
-        bbox=tuple(float(v) for v in bbox),
-        polygon=tuple(float(v) for v in _require(raw, "segmentation", stem)),
+        severity=_require_int(raw, "severity", stem),
+        area=_number(_require(raw, "area", stem), stem, "area"),
+        bbox=tuple(_number(v, stem, "bbox 원소") for v in bbox),
+        polygon=tuple(_number(v, stem, "segmentation 원소") for v in polygon),
     )
 
 
@@ -164,7 +180,7 @@ def _parse_visionqa(raw: dict, stem: str) -> VisionQA:
     if cropped_bbox is not None:
         if len(cropped_bbox) != 4:
             raise LabelParseError(f"{stem}: cropped_bbox는 4개여야 함 (실제 {len(cropped_bbox)})")
-        cropped_bbox = tuple(int(v) for v in cropped_bbox)
+        cropped_bbox = tuple(int(_number(v, stem, "cropped_bbox 원소")) for v in cropped_bbox)
     return VisionQA(
         object_description=_require(raw, "object_description", stem),
         questions=questions,
@@ -189,17 +205,18 @@ def parse_label_file(path: Path | str) -> LabelRecord:
     if generator_name not in _EQUIPMENT_BY_GENERATOR:
         raise LabelParseError(f"{stem}: generator_name이 풍력/태양광이 아님 — '{generator_name}'")
     equipment = _EQUIPMENT_BY_GENERATOR[generator_name]
+    _require(info, "part_side_tag", stem)  # D1 이력 DB(U4)의 부위 컬럼 소스 — 부재를 조기 검출
 
     image_raw = _require(data, "image", stem)
     image = ImageMeta(
-        id=_require(image_raw, "id", stem),
-        width=_require(image_raw, "width", stem),
-        height=_require(image_raw, "height", stem),
+        id=_require_int(image_raw, "id", stem),
+        width=_require_int(image_raw, "width", stem),
+        height=_require_int(image_raw, "height", stem),
         filename=_require(image_raw, "filename", stem),
     )
     categories = _parse_categories(_require(data, "categories", stem), stem)
     annotations = [_parse_annotation(a, categories, stem) for a in data.get("annotations", [])]
-    return LabelRecord(
+    record = LabelRecord(
         stem=stem,
         equipment=equipment,
         is_normal=_IS_NORMAL_BY_DB[db_name],
@@ -211,6 +228,36 @@ def parse_label_file(path: Path | str) -> LabelRecord:
         annotations=annotations,
         visionqa=_parse_visionqa(_require(data, "visionqa", stem), stem),
     )
+    _validate_variant(record)
+    return record
+
+
+_EXPECTED_QUESTIONS = {
+    (Equipment.WIND, True): {"detection"},
+    (Equipment.SOLAR, True): {"detection"},
+    (Equipment.SOLAR, False): {"detection", "localization"},
+    (Equipment.WIND, False): {"detection", "localization", "analysis", "classification"},
+}
+
+
+def _validate_variant(record: LabelRecord) -> None:
+    """QA 변형 정합성(DATA_NOTES §3) — (설비, 정상여부)가 필드 구성을 결정한다."""
+    expected = _EXPECTED_QUESTIONS[(record.equipment, record.is_normal)]
+    actual = set(record.visionqa.questions)
+    if actual != expected:
+        raise LabelParseError(
+            f"{record.stem}: 문항 구성 {sorted(actual)}이 변형 기대 {sorted(expected)}와 다름"
+        )
+    needs_crop = record.equipment is Equipment.WIND and not record.is_normal
+    if (record.visionqa.cropped_bbox is not None) != needs_crop:
+        raise LabelParseError(f"{record.stem}: cropped_bbox 유무가 변형(풍력 결함 전용)과 불일치")
+    if record.is_normal == bool(record.annotations):
+        raise LabelParseError(
+            f"{record.stem}: db_name(정상={record.is_normal})과 annotations 유무가 모순"
+        )
+    tag = record.filename.db_tag
+    if tag is not None and (tag == "Normal") != record.is_normal:
+        raise LabelParseError(f"{record.stem}: 파일명 태그 '{tag}'와 db_name이 모순")
 
 
 def representative_defect(record: LabelRecord) -> Annotation | None:
@@ -221,8 +268,13 @@ def representative_defect(record: LabelRecord) -> Annotation | None:
 
 
 def load_all_labels(root: Path | str) -> list[LabelRecord]:
-    """root 아래 라벨 JSON 전체를 파싱하고 파일 간 카테고리 일관성을 검증한다."""
+    """root 아래 라벨 JSON 전체를 파싱하고 파일 간 일관성(카테고리·stem 유일성)을 검증한다."""
     records = [parse_label_file(p) for p in sorted(Path(root).rglob("*.json"))]
+    seen_stems: set[str] = set()
+    for record in records:
+        if record.stem in seen_stems:
+            raise LabelParseError(f"{record.stem}: stem 중복 — 하류 단위의 조인 키가 유일해야 함")
+        seen_stems.add(record.stem)
     _validate_category_consistency(records)
     return records
 
