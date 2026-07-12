@@ -11,3 +11,4 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     llm_model: str = "claude-opus-4-8"
     data_dir: Path = Path("data")
+    stores_dir: Path = Path("stores")  # V1·V2·D1 저장소 루트 — 차단 검사의 스캔 대상

@@ -15,4 +15,5 @@ venv/
 
 # 로컬 산출물
 chroma_db/
+stores/
 *.sqlite3
