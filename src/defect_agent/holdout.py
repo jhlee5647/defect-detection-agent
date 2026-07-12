@@ -59,6 +59,8 @@ def split_holdout(
 
     같은 시드는 입력 순서와 무관하게 항상 같은 결과를 낸다 — 클래스·stem을
     정렬한 뒤 클래스 이름순으로 시드 고정 표본추출을 하기 때문.
+    단 random.sample은 파이썬 버전 간 재현이 보장되지 않으므로, 봉인의 정본은
+    커밋된 매니페스트이고 이 함수는 재현 증빙용이다 (달라지면 검사가 실패).
     """
     클래스별_stems: dict[str, list[str]] = {}
     for record in records:
@@ -87,28 +89,33 @@ def write_manifest(split: HoldoutSplit, path: Path = MANIFEST_PATH) -> None:
 
 
 def load_manifest(path: Path = MANIFEST_PATH) -> HoldoutSplit:
-    """매니페스트 JSON을 읽어 HoldoutSplit으로 복원한다."""
+    """매니페스트 JSON을 읽어 HoldoutSplit으로 복원한다. size 불일치 변조는 거부."""
     data = json.loads(path.read_text(encoding="utf-8"))
-    return HoldoutSplit(
+    split = HoldoutSplit(
         seed=data["seed"],
         by_class={c: tuple(stems) for c, stems in data["by_class"].items()},
     )
+    if data["size"] != len(split.stems):
+        raise ValueError(f"{path}: size {data['size']} ≠ stem 수 {len(split.stems)} — 변조 의심")
+    return split
 
 
 def scan_stores(stores_dir: Path, stems: tuple[str, ...]) -> list[str]:
-    """저장소 폴더의 모든 파일을 바이트 검사해 홀드아웃 stem 유입을 찾는다.
+    """저장소 폴더의 파일 경로·내용을 검사해 홀드아웃 stem 유입을 찾는다.
 
-    모든 저장소(Chroma·SQLite)는 레코드를 stem으로 키잉하므로, 유입되면 stem
-    문자열이 파일에 반드시 남는다 — 저장소 기술과 무관한 물리 검사.
+    모든 저장소(Chroma·SQLite)는 레코드를 stem으로 키잉하므로, 유입되면 stem이
+    파일 내용(UTF-8/UTF-16LE 평문 전제 — 압축·암호화 저장이면 미검출) 또는
+    파일명(stem 키잉 캐시·크롭 파일)에 남는다.
     반환값은 위반 메시지 목록(비면 통과). 폴더가 없으면 검사 대상 없음 → 빈 목록.
     """
     if not stores_dir.exists():
         return []
-    patterns = [(stem, stem.encode("utf-8")) for stem in stems]
+    patterns = [(stem, (stem.encode("utf-8"), stem.encode("utf-16-le"))) for stem in stems]
     violations = []
     for file in sorted(p for p in stores_dir.rglob("*") if p.is_file()):
+        상대경로 = file.relative_to(stores_dir).as_posix()
         content = file.read_bytes()
-        for stem, pattern in patterns:
-            if pattern in content:
+        for stem, encoded in patterns:
+            if stem in 상대경로 or any(p in content for p in encoded):
                 violations.append(f"{file}: 홀드아웃 stem '{stem}' 유입")
     return violations

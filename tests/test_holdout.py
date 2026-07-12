@@ -190,6 +190,39 @@ def test_하위_폴더까지_재귀_검사(tmp_path: Path):
     assert len(scan_stores(tmp_path / "stores", (stem,))) == 1
 
 
+def test_파일명에만_stem이_있어도_검출(tmp_path: Path):
+    """적대적 리뷰 Major — stem 이름으로 저장된 크롭 이미지 등은 내용에 stem이 없다."""
+    stem = "2022_Sungsan_10_A_LeadingEdge_001"
+    폴더 = tmp_path / "stores" / "v1_crops"
+    폴더.mkdir(parents=True)
+    (폴더 / f"{stem}.jpg").write_bytes(b"\xff\xd8\xff\xe0 fake jpeg")
+    assert len(scan_stores(tmp_path / "stores", (stem,))) == 1
+
+
+def test_UTF16_내용_유입도_검출(tmp_path: Path):
+    """적대적 리뷰 Minor — SQLite는 UTF-16 인코딩으로도 만들 수 있다."""
+    stem = "2022_Sungsan_10_A_LeadingEdge_001"
+    stores = tmp_path / "stores"
+    stores.mkdir()
+    (stores / "d1.sqlite").write_bytes(stem.encode("utf-16-le"))
+    assert len(scan_stores(stores, (stem,))) == 1
+
+
+def test_매니페스트_size_불일치는_에러(tmp_path: Path):
+    """적대적 리뷰 Minor — size 필드와 stem 수가 어긋난 변조본은 로드를 거부한다."""
+    import json
+
+    import pytest
+
+    경로 = tmp_path / "manifest.json"
+    경로.write_text(
+        json.dumps({"seed": 42, "size": 3, "by_class": {"Paint Damage": ["a", "b"]}}),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError):
+        load_manifest(경로)
+
+
 def test_유입_없으면_통과(tmp_path: Path):
     stores = tmp_path / "stores"
     stores.mkdir()
