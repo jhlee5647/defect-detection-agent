@@ -83,7 +83,7 @@ def _레코드(tmp_path, 상대경로: str, 데이터: dict):
 
 
 def test_창_내부_폴리곤은_평행이동한_타이트_bbox(tmp_path):
-    # 폴리곤 사각형 (3000,2800)~(3100,2850) — 창 [2801,2549,4721,3629] 완전 내부
+    # 폴리곤 사각형 (3000,2800)~(3100,2850) — 창(x 2801~4721, y 2549~3629) 완전 내부
     polygon = [3000.0, 2800.0, 3100.0, 2800.0, 3100.0, 2850.0, 3000.0, 2850.0]
     record = _레코드(tmp_path, 풍력_결함_경로, 풍력_결함_데이터(polygon))
 
@@ -171,4 +171,14 @@ def test_창과_겹치지_않는_폴리곤은_에러(tmp_path):
     record = _레코드(tmp_path, 풍력_결함_경로, 풍력_결함_데이터(polygon))
 
     with pytest.raises(GeometryError, match="겹치지 않음"):
+        localization_bbox(record)
+
+
+def test_창에_접촉만_하는_폴리곤은_에러(tmp_path):
+    """면적 0 접촉은 공집합 검사를 우회해 (x,y,0,0)이 되던 경로 (적대적 리뷰 M2)."""
+    # 오른쪽 변이 창 왼쪽 경계 x=2801에 닿기만 하는 사각형 (2700,2600)~(2801,2700)
+    polygon = [2700.0, 2600.0, 2801.0, 2600.0, 2801.0, 2700.0, 2700.0, 2700.0]
+    record = _레코드(tmp_path, 풍력_결함_경로, 풍력_결함_데이터(polygon))
+
+    with pytest.raises(GeometryError, match="면적 0"):
         localization_bbox(record)

@@ -250,3 +250,17 @@ def test_좌표_형식이_아닌_보기_텍스트는_에러():
 
     with pytest.raises(ScoringError, match="좌표 형식"):
         match_localization_option(보기, (199, 251, 100, 50))
+
+
+def test_숫자가_아닌_좌표_원소는_에러():
+    """길이 4 리스트지만 원소가 숫자가 아님 — raw TypeError 누출 금지 (적대적 리뷰 M1).
+
+    JSON의 true는 산술상 1로 취급돼 조용히 매칭될 수 있으므로 bool도 배제한다.
+    """
+    문자_원소 = {"a": '["x",2,3,4]', "b": "[199,251,100,50]"}
+    불리언_원소 = {"a": "[true,251,100,50]", "b": "[199,251,100,50]"}
+
+    with pytest.raises(ScoringError, match="숫자"):
+        match_localization_option(문자_원소, (199, 251, 100, 50))
+    with pytest.raises(ScoringError, match="숫자"):
+        match_localization_option(불리언_원소, (199, 251, 100, 50))

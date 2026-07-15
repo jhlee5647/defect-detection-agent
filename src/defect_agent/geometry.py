@@ -30,6 +30,10 @@ def localization_bbox(record: LabelRecord) -> tuple[int, int, int, int]:
     xs, ys = [p[0] for p in clipped], [p[1] for p in clipped]
     x, y = min(xs) - window[0], min(ys) - window[1]
     w, h = max(xs) - min(xs), max(ys) - min(ys)
+    if w == 0 or h == 0:
+        raise GeometryError(
+            f"{record.stem}: 대표결함 폴리곤과 크롭 창의 겹침이 면적 0 — 경계 접촉만"
+        )
     return (math.floor(x), math.floor(y), math.floor(w), math.floor(h))
 
 

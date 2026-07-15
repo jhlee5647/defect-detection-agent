@@ -15,38 +15,43 @@ class ScoringError(ValueError):
     """채점 불가능한 입력 — 평가 하네스 버그 또는 데이터 이상 신호 (fail-fast)."""
 
 
-_허용_오차_PX = 2  # DATA_NOTES §4 — 계산 bbox와 보기 값의 실측 오차 상한 ≤2px
+_TOLERANCE_PX = 2  # DATA_NOTES §4 — 계산 bbox와 보기 값의 실측 오차 상한 ≤2px
 
 
-def match_localization_option(options: dict[str, str], bbox: tuple[int, int, int, int]) -> str:
+def match_localization_option(
+    options: dict[str, str], bbox: tuple[int, int, int, int], ctx: str = "localization"
+) -> str:
     """계산된 bbox와 좌표별 ±2px 이내인 보기를 고른다 — 유일하지 않으면 에러 (계획서 D1)."""
     matches = [
         letter
         for letter, text in sorted(options.items())
         if all(
-            abs(a - b) <= _허용_오차_PX for a, b in zip(_parse_bbox_text(text), bbox, strict=True)
+            abs(a - b) <= _TOLERANCE_PX for a, b in zip(_parse_bbox_text(text), bbox, strict=True)
         )
     ]
     if len(matches) != 1:
         raise ScoringError(
-            f"bbox {bbox}와 ±{_허용_오차_PX}px 이내 보기 {len(matches)}개 — 유일해야 함"
+            f"{ctx}: bbox {bbox}와 ±{_TOLERANCE_PX}px 이내 보기 {len(matches)}개 — 유일해야 함"
         )
     return matches[0]
 
 
-def _parse_bbox_text(text: str) -> tuple[int, int, int, int]:
-    """보기 텍스트 "[x,y,w,h]" → 정수 4개 (금일 실측 형식)."""
+def _parse_bbox_text(text: str) -> tuple[float, float, float, float]:
+    """보기 텍스트 "[x,y,w,h]" → 숫자 4개 (실측 형식)."""
     try:
         values = json.loads(text)
     except json.JSONDecodeError as e:
         raise ScoringError(f"localization 보기 텍스트가 좌표 형식이 아님 — {text!r}") from e
     if not isinstance(values, list) or len(values) != 4:
         raise ScoringError(f"localization 보기는 좌표 4개여야 함 — {text!r}")
-    return tuple(values)
+    # bool은 JSON true/false가 산술상 1/0으로 취급돼 조용히 매칭될 수 있어 배제한다
+    if any(not isinstance(v, (int, float)) or isinstance(v, bool) for v in values):
+        raise ScoringError(f"localization 보기 좌표 원소가 숫자가 아님 — {text!r}")
+    return tuple(float(v) for v in values)
 
 
 # 94건 전수 실측 — detection 보기 텍스트는 {예, 아니오} 고정, 정답은 db_name과 94/94 일치
-_DETECTION_정답_텍스트 = {True: "아니오", False: "예"}  # is_normal → 정답 보기 텍스트
+_DETECTION_ANSWER_TEXT = {True: "아니오", False: "예"}  # is_normal → 정답 보기 텍스트
 
 
 def derive_answers(record: LabelRecord) -> dict[str, str]:
@@ -58,13 +63,15 @@ def derive_answers(record: LabelRecord) -> dict[str, str]:
     answers = {
         "detection": _match_by_text(
             questions["detection"].options,
-            _DETECTION_정답_텍스트[record.is_normal],
+            _DETECTION_ANSWER_TEXT[record.is_normal],
             f"{record.stem}: detection",
         )
     }
     if "localization" in questions:
         answers["localization"] = match_localization_option(
-            questions["localization"].options, localization_bbox(record)
+            questions["localization"].options,
+            localization_bbox(record),
+            f"{record.stem}: localization",
         )
     if "classification" in questions:
         answers["classification"] = _match_by_text(
@@ -96,8 +103,8 @@ def score_record(record: LabelRecord, answers: dict[str, str]) -> ScoreResult:
     """
     expected, actual = set(record.visionqa.questions), set(answers)
     if actual != expected:
-        누락, 여분 = sorted(expected - actual), sorted(actual - expected)
-        raise ScoringError(f"{record.stem}: 답안 문항 불일치 — 누락 {누락}, 여분 {여분}")
+        missing, extra = sorted(expected - actual), sorted(actual - expected)
+        raise ScoringError(f"{record.stem}: 답안 문항 불일치 — 누락 {missing}, 여분 {extra}")
     per_question: dict[str, bool] = {}
     invalid: set[str] = set()
     for kind, question in record.visionqa.questions.items():
